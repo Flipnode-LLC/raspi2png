@@ -49,7 +49,7 @@
 #define DEFAULT_DELAY 0
 #define DEFAULT_DISPLAY_NUMBER 0
 #define DEFAULT_NAME "snapshot.png"
-
+#define DEFAULT_ROTATION 0
 //-----------------------------------------------------------------------
 
 const char* program = NULL;
@@ -63,7 +63,7 @@ usage(void)
     fprintf(stderr, " [--width <width>] [--height <height>]");
     fprintf(stderr, " [--compression <level>]");
     fprintf(stderr, " [--delay <delay>] [--display <number>]");
-    fprintf(stderr, " [--stdout] [--help]\n");
+    fprintf(stderr, " [--stdout] [--rotate <rotation>] [--help]\n");
 
     fprintf(stderr, "\n");
 
@@ -86,6 +86,9 @@ usage(void)
     fprintf(stderr, "(default %d)\n", DEFAULT_DISPLAY_NUMBER);
 
     fprintf(stderr, "    --stdout,-s - write file to stdout\n");
+    
+    fprintf(stderr, "    --rotate,-r - rotate output image ");
+    fprintf(stderr, "(Use 'CW' or 'CCW' or 'UD')\n");
 
     fprintf(stderr, "    --help,-H - print this usage information\n");
 
@@ -103,6 +106,7 @@ main(
     int opt = 0;
 
     bool writeToStdout = false;
+    int32_t rotation = DEFAULT_ROTATION;
     char *pngName = DEFAULT_NAME;
     int32_t requestedWidth = 0;
     int32_t requestedHeight = 0;
@@ -119,7 +123,7 @@ main(
 
     //-------------------------------------------------------------------
 
-    char *sopts = "c:d:D:Hh:p:w:s";
+    char *sopts = "c:d:D:Hh:p:w:s:r";
 
     struct option lopts[] =
     {
@@ -131,6 +135,7 @@ main(
         { "pngname", required_argument, NULL, 'p' },
         { "width", required_argument, NULL, 'w' },
         { "stdout", no_argument, NULL, 's' },
+        { "rotate", required_argument, NULL, 'r' },
         { NULL, no_argument, NULL, 0 }
     };
 
@@ -179,6 +184,17 @@ main(
             writeToStdout = true;
             break;
 
+        case 'r':
+
+            if (!strcmp(optarg, "CW")){
+                rotation = 1;
+            }else if (!strcmp(optarg, "CCW")){
+                rotation = 2;
+            }else if (!strcmp(optarg, "UD")){
+                rotation = 3;
+            }
+            break;
+
         case 'H':
         default:
 
@@ -216,6 +232,7 @@ main(
                                   "display_rotate",
                                   &displayRotated);
     }
+
 
     //-------------------------------------------------------------------
 
@@ -358,7 +375,6 @@ main(
 
     //-------------------------------------------------------------------
     // Convert from RGBA (32 bit) to RGB (24 bit)
-
     int8_t pngBytesPerPixel = 3;
     int32_t pngPitch = pngBytesPerPixel * pngWidth;
     void *pngImagePtr = malloc(pngPitch * pngHeight);
@@ -497,6 +513,66 @@ main(
     dmxImagePtr = NULL;
 
     //-------------------------------------------------------------------
+
+    //-------------------------------------------------------------------
+    // Rotate output image if needed
+    void *rotImagePtr = NULL;
+    if (rotation){
+        rotImagePtr = malloc(pngPitch * pngHeight);
+        if (rotImagePtr == NULL){
+            fprintf(stderr, "%s: unable to allocated image buffer\n", program);
+            exit(EXIT_FAILURE);
+        }
+        int32_t row = 0;
+        int32_t col = 0;
+
+        for (row = 0; row < pngHeight; row++){
+            
+            int32_t rotColOffset = 0;
+            int32_t rotRowOffset = 0;
+
+            switch (rotation){
+                case 1:
+                    rotColOffset = (pngHeight - row - 1) * pngBytesPerPixel; 
+                    break;
+                case 2:
+                    rotColOffset = row * pngBytesPerPixel;  
+                    break;
+                case 3:
+                    rotRowOffset = (pngHeight - row - 1) * pngWidth * pngBytesPerPixel;
+                    break;
+            }
+            for (col = 0; col < pngWidth; col++){
+                uint8_t *pngPixelPtr = pngImagePtr
+                                + (col * pngBytesPerPixel)
+                                + (row * pngPitch);
+                switch (rotation){
+                    case 1:
+                        rotRowOffset = col * pngHeight * pngBytesPerPixel;
+                        break;
+                    case 2:
+                        rotRowOffset = (pngWidth - col - 1) * pngHeight * pngBytesPerPixel;
+                        break;
+                    case 3:
+                        rotColOffset = (pngWidth - col -1) * pngBytesPerPixel; 
+                        break;
+                }
+                uint8_t *rotPixelPtr = rotImagePtr + rotColOffset + rotRowOffset;
+                memcpy(rotPixelPtr, pngPixelPtr, 3);
+            }
+        }
+        
+        free(pngImagePtr);
+        pngImagePtr = rotImagePtr;
+        
+        if (rotation == 1 || rotation == 2){
+            int32_t tmp;
+            tmp = pngHeight;
+            pngHeight = pngWidth;
+            pngWidth = tmp;
+            pngPitch = pngBytesPerPixel * pngWidth; 
+        }
+    }
 
     png_structp pngPtr = png_create_write_struct(PNG_LIBPNG_VER_STRING,
                                                  NULL,
